@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=2.0, user-scalable=yes">
+    <link rel="stylesheet" href="style.css" type="text/css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+      integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"
+      integrity="sha512-U5C477Z8VvmbYAoV4HDq17tf4wG6HXPC6/KM9+0/wEXQQ13gmKY2Zb0Z2vu0VNUWch4GlJ+Tl/dfoLOH4i2msw=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <style>
+      * {
+          user-select: none; /* Prevent text selection */
+          cursor: default; /* Prevent text cursor */
+        }
+        html {
+                overflow-y: scroll; /* Ensures scrollbar is always visible */
+                scrollbar-width: thin; /* Firefox scrollbar width */
+                scrollbar-color: #171616 #171616; /* Custom scrollbar colors */
+              }
+    </style>
+    <title>PDF Viewer</title>
+  </head>
+  <body>
+    <main>
+      <h3>PDF Viewer</h3>
+      <canvas class="pdf-viewer"></canvas>
+    </main>
+    <footer>
+      <ul class="pagination">
+        <li>
+          <button id="rotate">
+            <i class="fas fa-undo-alt"></i>
+          </button>
+        </li>
+        <li>
+          <button id="zoomOut">
+            <i class="fas fa-search-minus"></i>
+          </button>
+        </li>
+        <li>
+          <span id="zoomValue">100%</span>
+        </li>
+        <li>
+          <button id="zoomIn">
+            <i class="fas fa-search-plus"></i>
+          </button>
+        </li>
+        <li>
+          <button id="previous">
+            <i class="fas fa-arrow-alt-circle-left"></i>
+          </button>
+        </li>
+        <li>
+          <span id="current_page">1 of 1</span>
+        </li>
+        <li>
+          <button id="next">
+           <i class="fas fa-arrow-alt-circle-right"></i>
+          </button>
+        </li>
+        <li>
+          <button id="download">
+            <i class="fas fa-download"></i>
+          </button>
+        </li>
+      </ul>
+    </footer>
+    <script>
+      const currentPage = document.getElementById("current_page");
+      const viewer = document.querySelector(".pdf-viewer");
+      const rotateButton = document.getElementById("rotate");
+      const downloadButton = document.getElementById("download");
+      let currentPDF = {};
+
+      document.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+      });
+
+      function resetCurrentPDF() {
+        currentPDF = {
+          file: null,
+          countOfPages: 0,
+          currentPage: 1,
+          zoom: 1.0,
+          rotations: {}, // Store rotation values per page
+        };
+      }
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.worker.min.js";
+
+      // Configure PDF.js for maximum quality
+      pdfjsLib.maxImageSize = 32768 * 32768;
+      pdfjsLib.cMapUrl = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.9.359/cmaps/';
+      pdfjsLib.cMapPacked = true;
+
+      function loadPDF(source) {
+        const loadingTask = pdfjsLib.getDocument({
+          url: source,
+          maxImageSize: 32768 * 32768,
+          isEvalSupported: true,
+          useSystemFonts: true,
+          disableFontFace: false,
+          cMapPacked: true,
+          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.9.359/standard_fonts/'
+        });
+        resetCurrentPDF();
+
+        loadingTask.promise
+          .then((pdfDocument) => {
+            currentPDF.file = pdfDocument;
+            currentPDF.countOfPages = pdfDocument.numPages;
+            viewer.classList.remove("hidden");
+            document.querySelector("main h3").classList.add("hidden");
+            renderCurrentPage();
+          })
+          .catch((error) => {
+            console.error("Error loading PDF:", error);
+            alert(
+              "Error loading PDF. Please check the file path and try again."
+            );
+          });
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const file = urlParams.get("file");
+        if (file) loadPDF(file);
+        else alert("No PDF file selected. Redirecting to home page.");
+      });
+
+      let zoomLevels = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+      let currentZoomIndex = 2; // Start at 1.0
+
+      document.getElementById("zoomIn").addEventListener("click", () => {
+        if (currentPDF.file && currentZoomIndex < zoomLevels.length - 1) {
+          currentZoomIndex++;
+          currentPDF.zoom = zoomLevels[currentZoomIndex];
+          document.getElementById("zoomValue").innerHTML =
+            Math.round(currentPDF.zoom * 100) + "%";
+          renderCurrentPage();
+        }
+      });
+
+      document.getElementById("zoomOut").addEventListener("click", () => {
+        if (currentPDF.file && currentZoomIndex > 0) {
+          currentZoomIndex--;
+          currentPDF.zoom = zoomLevels[currentZoomIndex];
+          document.getElementById("zoomValue").innerHTML =
+            Math.round(currentPDF.zoom * 100) + "%";
+          renderCurrentPage();
+        }
+      });
+
+      document.getElementById("next").addEventListener("click", () => {
+        if (currentPDF.currentPage < currentPDF.countOfPages) {
+          currentPDF.currentPage += 1;
+          renderCurrentPage();
+        }
+      });
+
+      document.getElementById("previous").addEventListener("click", () => {
+        if (currentPDF.currentPage - 1 > 0) {
+          currentPDF.currentPage -= 1;
+          renderCurrentPage();
+        }
+      });
+
+      rotateButton.addEventListener("click", () => {
+        if (currentPDF.file) {
+          const currentPageRotation =
+            currentPDF.rotations[currentPDF.currentPage] || 0;
+          currentPDF.rotations[currentPDF.currentPage] =
+            (currentPageRotation + 90) % 360;
+          renderCurrentPage();
+        }
+      });
+
+      downloadButton.addEventListener("click", () => {
+        if (currentPDF.file) {
+          const link = document.createElement("a");
+          link.href = currentPDF.file.getData().then((data) => {
+            const blob = new Blob([data], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+            link.href = url;
+            link.download = "downloaded.pdf";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          });
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (currentPDF.file) {
+          if (event.key === "ArrowRight") {
+            if (currentPDF.currentPage < currentPDF.countOfPages) {
+              currentPDF.currentPage += 1;
+              renderCurrentPage();
+            }
+          } else if (event.key === "ArrowLeft") {
+            if (currentPDF.currentPage > 1) {
+              currentPDF.currentPage -= 1;
+              renderCurrentPage();
+            }
+          } else if (event.key === "=" || event.key === "+") {
+            if (currentZoomIndex < zoomLevels.length - 1) {
+              currentZoomIndex++;
+              currentPDF.zoom = zoomLevels[currentZoomIndex];
+              document.getElementById("zoomValue").innerHTML =
+                Math.round(currentPDF.zoom * 100) + "%";
+              renderCurrentPage();
+            }
+          } else if (event.key === "-") {
+            if (currentZoomIndex > 0) {
+              currentZoomIndex--;
+              currentPDF.zoom = zoomLevels[currentZoomIndex];
+              document.getElementById("zoomValue").innerHTML =
+                Math.round(currentPDF.zoom * 100) + "%";
+              renderCurrentPage();
+            }
+          }
+        }
+      });
+
+      // Add touch event handlers
+      let touchStartX = 0;
+      let touchEndX = 0;
+      
+      document.addEventListener('touchstart', e => {
+        touchStartX = e.changedTouches[0].screenX;
+      });
+
+      document.addEventListener('touchend', e => {
+        touchEndX = e.changedTouches[0].screenX;
+        handleSwipe();
+      });
+
+      function handleSwipe() {
+        const swipeThreshold = 50;
+        const swipeDistance = touchEndX - touchStartX;
+        
+        if (Math.abs(swipeDistance) > swipeThreshold) {
+          if (swipeDistance > 0 && currentPDF.currentPage > 1) {
+            // Swipe right - previous page
+            currentPDF.currentPage--;
+            renderCurrentPage();
+          } else if (swipeDistance < 0 && currentPDF.currentPage < currentPDF.countOfPages) {
+            // Swipe left - next page
+            currentPDF.currentPage++;
+            renderCurrentPage();
+          }
+        }
+      }
+
+      function renderCurrentPage() {
+        if (!currentPDF.file) return;
+        
+        currentPDF.file.getPage(currentPDF.currentPage).then((page) => {
+          const canvas = viewer;
+          const context = canvas.getContext('2d', {
+            alpha: false,
+            antialias: true,
+            desynchronized: true
+          });
+          
+          // Calculate optimal DPI
+          const DPI = 300;
+          const PIXEL_RATIO = window.devicePixelRatio || 1;
+          const SCALE_FACTOR = (DPI / 96) * PIXEL_RATIO;
+          
+          const viewport = page.getViewport({
+            scale: currentPDF.zoom * SCALE_FACTOR,
+            rotation: currentPDF.rotations[currentPDF.currentPage] || 0
+          });
+          
+          // Set canvas size for high resolution
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          
+          // Scale display size
+          canvas.style.width = `${viewport.width / SCALE_FACTOR}px`;
+          canvas.style.height = `${viewport.height / SCALE_FACTOR}px`;
+          
+          // High-quality rendering configuration
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport,
+            enableWebGL: true,
+            renderInteractiveForms: true,
+            renderTextLayer: true,
+            imageQuality: 2.0,
+            intent: 'print'
+          };
+          
+          // Clear previous render
+          if (currentPDF.renderTask) {
+            currentPDF.renderTask.cancel();
+          }
+          
+          currentPDF.renderTask = page.render(renderContext);
+          
+          currentPDF.renderTask.promise.then(() => {
+            context.imageSmoothingEnabled = true;
+            context.imageSmoothingQuality = 'high';
+          });
+        });
+        
+        currentPage.innerHTML = currentPDF.currentPage + " of " + currentPDF.countOfPages;
+      }
+      
+      // Add resize handler
+      window.addEventListener('resize', () => {
+        if (currentPDF.file) {
+          renderCurrentPage();
+        }
+      });
+    </script>
+  </body>
+</html>

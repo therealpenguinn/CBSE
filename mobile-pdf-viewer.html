@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <link rel="stylesheet" href="style.css" type="text/css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
+    <style>
+      .mobile-controls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background: rgba(0, 0, 0, 0.9);
+        padding: 10px;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        z-index: 1000;
+        backdrop-filter: blur(5px);
+      }
+
+      .mobile-btn {
+        background: none;
+        border: none;
+        color: white;
+        font-size: 1.5rem;
+        padding: 10px;
+        margin: 0 5px;
+      }
+
+      .page-info {
+        color: white;
+        font-size: 1rem;
+      }
+
+      .pdf-container {
+        width: 100%;
+        height: calc(100vh - 70px);
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .pdf-viewer {
+        display: block;
+        margin: 0 auto;
+        background: white;
+        touch-action: auto;
+      }
+
+      /* Pinch zoom support */
+      .pdf-container.zooming {
+        touch-action: pinch-zoom;
+      }
+
+      /* Hide scrollbars but keep functionality */
+      .pdf-container::-webkit-scrollbar {
+        width: 0px;
+        background: transparent;
+      }
+
+      @media (max-width: 480px) {
+        .mobile-btn {
+          font-size: 1.2rem;
+          padding: 8px;
+        }
+        
+        .page-info {
+          font-size: 0.9rem;
+        }
+      }
+
+      .zoom-warning {
+        display: none;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        z-index: 2000;
+        width: 80%;
+        max-width: 300px;
+      }
+
+      .warning-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 15px;
+      }
+
+      .warning-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 5px;
+        background: #2d7a2d;
+        color: white;
+        font-size: 1rem;
+      }
+    </style>
+    <title>Mobile PDF Viewer</title>
+  </head>
+  <body>
+    <div class="pdf-container">
+      <canvas class="pdf-viewer"></canvas>
+    </div>
+    
+    <div class="zoom-warning" id="zoomWarning">
+      <p>Zoom is not available on mobile devices.</p>
+      <p>Please download the PDF or view on desktop for zoom functionality.</p>
+      <div class="warning-buttons">
+        <button class="warning-btn" id="downloadBtn">Download PDF</button>
+        <button class="warning-btn" id="closeWarning">Close</button>
+      </div>
+    </div>
+    
+    <div class="mobile-controls">
+      <button class="mobile-btn" id="prev">
+        <i class="fas fa-chevron-left"></i>
+      </button>
+      <span class="page-info" id="pageInfo">1 of 1</span>
+      <button class="mobile-btn" id="next">
+        <i class="fas fa-chevron-right"></i>
+      </button>
+      <button class="mobile-btn" id="rotate">
+        <i class="fas fa-undo-alt"></i>
+      </button>
+      <button class="mobile-btn" id="download">
+        <i class="fas fa-download"></i>
+      </button>
+    </div>
+
+    <script>
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.worker.min.js';
+      
+      // Configure PDF.js for higher quality
+      pdfjsLib.maxImageSize = 32768 * 32768;
+      pdfjsLib.cMapUrl = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.9.359/cmaps/';
+      pdfjsLib.cMapPacked = true;
+      
+      let pdfDoc = null;
+      let pageNum = 1;
+      let pageRotation = 0;
+      const canvas = document.querySelector('.pdf-viewer');
+      const ctx = canvas.getContext('2d');
+
+      // Update the rendering function
+      async function renderPage(num) {
+        const page = await pdfDoc.getPage(num);
+        
+        // Calculate optimal resolution
+        const DPI = 300;
+        const PIXEL_RATIO = Math.max(window.devicePixelRatio || 1, 2);
+        const SCALE_FACTOR = (DPI / 96) * PIXEL_RATIO;
+        
+        // Calculate viewport size
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight - 70; // Account for controls
+        
+        // Calculate best fit scale
+        let scale;
+        if (pageRotation % 180 === 0) {
+          scale = Math.min(
+            screenWidth / originalViewport.width,
+            screenHeight / originalViewport.height
+          ) * SCALE_FACTOR;
+        } else {
+          scale = Math.min(
+            screenWidth / originalViewport.height,
+            screenHeight / originalViewport.width
+          ) * SCALE_FACTOR;
+        }
+        
+        const viewport = page.getViewport({ 
+          scale: scale,
+          rotation: pageRotation 
+        });
+        
+        // Set canvas dimensions for high resolution
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        
+        // Scale down display size while maintaining high resolution
+        canvas.style.width = `${viewport.width / SCALE_FACTOR}px`;
+        canvas.style.height = `${viewport.height / SCALE_FACTOR}px`;
+        
+        // Get rendering context with better settings
+        const ctx = canvas.getContext('2d', {
+          alpha: false,
+          antialias: true,
+          desynchronized: true
+        });
+        
+        // Clear canvas
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Configure high-quality rendering
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: viewport,
+          enableWebGL: true,
+          renderInteractiveForms: true,
+          imageQuality: 2.0,
+          intent: 'print'
+        };
+        
+        try {
+          // Render with maximum quality
+          await page.render(renderContext).promise;
+          
+          // Apply post-render optimizations
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          
+        } catch (error) {
+          console.error('Error rendering page:', error);
+        }
+      }
+
+      // Handle page navigation
+      document.getElementById('prev').onclick = () => {
+        if (pageNum > 1) {
+          pageNum--;
+          document.getElementById('pageInfo').textContent = `${pageNum} of ${pdfDoc.numPages}`;
+          renderPage(pageNum);
+        }
+      };
+
+      document.getElementById('next').onclick = () => {
+        if (pageNum < pdfDoc.numPages) {
+          pageNum++;
+          document.getElementById('pageInfo').textContent = `${pageNum} of ${pdfDoc.numPages}`;
+          renderPage(pageNum);
+        }
+      };
+
+      // Add rotation handler
+      document.getElementById('rotate').addEventListener('click', () => {
+        if (pdfDoc) {
+          pageRotation = (pageRotation + 90) % 360;
+          renderPage(pageNum);
+        }
+      });
+
+      // Add touch zoom detection
+      document.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+          document.getElementById('zoomWarning').style.display = 'block';
+        }
+      }, { passive: false });
+
+      // Handle warning dialog
+      document.getElementById('closeWarning').addEventListener('click', () => {
+        document.getElementById('zoomWarning').style.display = 'none';
+      });
+
+      document.getElementById('downloadBtn').addEventListener('click', async () => {
+        if (pdfDoc) {
+          const data = await pdfDoc.getData();
+          const blob = new Blob([data], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'document.pdf';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      // Swipe handling
+      let touchStart = null;
+      let touchEnd = null;
+
+      document.addEventListener('touchstart', e => {
+        touchStart = e.touches[0].clientX;
+      });
+
+      document.addEventListener('touchend', e => {
+        touchEnd = e.changedTouches[0].clientX;
+        handleSwipe();
+      });
+
+      function handleSwipe() {
+        if (!touchStart || !touchEnd) return;
+        
+        const swipeDistance = touchEnd - touchStart;
+        const minSwipeDistance = 50;
+
+        if (Math.abs(swipeDistance) > minSwipeDistance) {
+          if (swipeDistance > 0 && pageNum > 1) {
+            // Swipe right - previous page
+            document.getElementById('prev').click();
+          } else if (swipeDistance < 0 && pageNum < pdfDoc.numPages) {
+            // Swipe left - next page
+            document.getElementById('next').click();
+          }
+        }
+        
+        touchStart = null;
+        touchEnd = null;
+      }
+
+      // Update initialization function
+      async function initPDF() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const pdfPath = urlParams.get('file');
+        
+        if (!pdfPath) {
+          alert('No PDF specified');
+          return;
+        }
+
+        try {
+          pdfDoc = await pdfjsLib.getDocument({
+            url: pdfPath,
+            maxImageSize: 32768 * 32768,
+            isEvalSupported: true,
+            useSystemFonts: true,
+            disableFontFace: false,
+            cMapPacked: true,
+            standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.9.359/standard_fonts/'
+          }).promise;
+          
+          document.getElementById('pageInfo').textContent = `1 of ${pdfDoc.numPages}`;
+          await renderPage(pageNum);
+        } catch (error) {
+          console.error('Error loading PDF:', error);
+          alert('Error loading PDF');
+        }
+      }
+
+      // Initialize viewer
+      initPDF();
+
+      // Add resize handler
+      window.addEventListener('resize', () => {
+        if (pdfDoc) {
+          renderPage(pageNum);
+        }
+      });
+    </script>
+  </body>
+</html>
